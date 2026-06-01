@@ -8,7 +8,9 @@
 - Tester hinzufügen: Developer Portal → Rollen → Tester (bis zu 25 Personen ohne Veröffentlichung)
 
 ### Permissions (Anwendungsfälle)
+
 Folgende Permissions müssen im Developer Portal unter **Anwendungsfälle** aktiviert sein:
+
 - `pages_manage_posts` — Erstellen/Bearbeiten/Veröffentlichen von Posts
 - `pages_read_engagement` — Lesen von Page-Daten und Posts
 - `pages_show_list` — Liste verwalteter Pages abrufen
@@ -30,30 +32,34 @@ https://www.facebook.com/dialog/oauth
 - Für Produktivbetrieb: Long-Lived Token serverseitig gegen System User Token tauschen
 
 ### Token-Hierarchie
+
 1. **User Access Token** — kurzlebig, für OAuth
 2. **Long-Lived User Token** — ~60 Tage, über Token Exchange
 3. **Page Access Token** — abgeleitet vom User Token via `/me/accounts`, für alle Page-Operationen
 
 ### Pages abrufen
+
 ```
 GET /v22.0/me/accounts?access_token={USER_TOKEN}
 ```
+
 Gibt alle verwalteten Pages mit ihren Page Access Tokens zurück.
 
 ---
 
 ## 3. Verwaltete Pages
 
-| Page | ID |
-|------|----|
-| Levin Keller | `1176555975533708` |
-| CDU Gemeindeverband Nordstemmen | `102752935221041` |
+| Page                            | ID                 |
+| ------------------------------- | ------------------ |
+| Levin Keller                    | `1176555975533708` |
+| CDU Gemeindeverband Nordstemmen | `102752935221041`  |
 
 ---
 
 ## 4. Posts erstellen
 
 ### Veröffentlicht
+
 ```
 POST /v22.0/{page-id}/feed
   message=...
@@ -62,6 +68,7 @@ POST /v22.0/{page-id}/feed
 ```
 
 ### Draft (erscheint in Business Suite → Entwürfe)
+
 ```
 POST /v22.0/{page-id}/feed
   message=...
@@ -70,9 +77,13 @@ POST /v22.0/{page-id}/feed
   unpublished_content_type=DRAFT
   access_token={PAGE_TOKEN}
 ```
-> **Wichtig:** Nur `published=false` ohne `unpublished_content_type=DRAFT` erstellt einen "Dark Post" (unsichtbar in Business Suite). `DRAFT` ist in der offiziellen Doku nicht dokumentiert, aber im Meta Python SDK bestätigt.
+
+> **Wichtig:** Nur `published=false` ohne `unpublished_content_type=DRAFT` erstellt einen "Dark
+> Post" (unsichtbar in Business Suite). `DRAFT` ist in der offiziellen Doku nicht dokumentiert, aber
+> im Meta Python SDK bestätigt.
 
 ### Geplant
+
 ```
 POST /v22.0/{page-id}/feed
   message=...
@@ -82,6 +93,7 @@ POST /v22.0/{page-id}/feed
 ```
 
 ### Draft bearbeiten
+
 ```
 POST /v22.0/{post-id}
   message=Neuer Text
@@ -89,6 +101,7 @@ POST /v22.0/{post-id}
 ```
 
 ### Draft veröffentlichen
+
 ```
 POST /v22.0/{post-id}
   is_published=true
@@ -96,12 +109,14 @@ POST /v22.0/{post-id}
 ```
 
 ### Post löschen
+
 ```
 DELETE /v22.0/{post-id}
   access_token={PAGE_TOKEN}
 ```
 
 ### Repost auf anderer Page
+
 ```
 POST /v22.0/{other-page-id}/feed
   link=https://www.facebook.com/permalink.php?story_fbid={post-id}&id={page-id}
@@ -113,6 +128,7 @@ POST /v22.0/{other-page-id}/feed
 ## 5. Bilder in Posts
 
 Erst Bild hochladen (unpublished):
+
 ```
 POST /v22.0/{page-id}/photos
   source={binary}
@@ -122,6 +138,7 @@ POST /v22.0/{page-id}/photos
 ```
 
 Dann Post mit Bild:
+
 ```
 POST /v22.0/{page-id}/feed
   message=...
@@ -135,11 +152,15 @@ POST /v22.0/{page-id}/feed
 
 ## 6. Bekannte Einschränkungen
 
-- **Persönliche Profile:** Kein API-Posting möglich seit 2018 (`publish_actions` deprecated). Gilt auch für Professional Mode / Pro Account.
-- **Business Suite Drafts:** `published=false` allein reicht nicht — `unpublished_content_type=DRAFT` nötig.
-- **Single-Photo Drafts:** Noch buggy bei `unpublished_content_type=DRAFT`, Workaround: Foto erst separat hochladen, dann als `attached_media` anhängen.
+- **Persönliche Profile:** Kein API-Posting möglich seit 2018 (`publish_actions` deprecated). Gilt
+  auch für Professional Mode / Pro Account.
+- **Business Suite Drafts:** `published=false` allein reicht nicht —
+  `unpublished_content_type=DRAFT` nötig.
+- **Single-Photo Drafts:** Noch buggy bei `unpublished_content_type=DRAFT`, Workaround: Foto erst
+  separat hochladen, dann als `attached_media` anhängen.
 - **Professional Mode Profile:** Tauchen nicht in `/me/accounts` auf, kein API-Zugriff möglich.
-- **Token-Ablauf:** User Tokens laufen ab. Für Produktivbetrieb: System User Tokens (ablauflos) über Business Manager anlegen.
+- **Token-Ablauf:** User Tokens laufen ab. Für Produktivbetrieb: System User Tokens (ablauflos) über
+  Business Manager anlegen.
 
 ---
 
@@ -160,10 +181,19 @@ https://business.facebook.com/latest/posts/published_posts?asset_id={PAGE_ID}
 
 ## 8. MCP Server Sketch — Facebook Connector (Cloudflare Worker)
 
+> **Implementierungsstand:** Dieser Abschnitt ist die ursprüngliche Skizze. Die tatsächliche
+> Implementierung läuft als **Bunny Edge Script** (Deno) mit **Bunny Database** (libSQL) statt
+> Cloudflare Worker + KV. Aufbau, Deployment und Bedienung sind in [`README.md`](./README.md)
+> dokumentiert. Die Tool- und OAuth-Logik unten gilt weiterhin; nur Runtime und Token-Speicher
+> wurden ersetzt (KV → libSQL-Tabelle `fb_tokens`).
+
 ### Ziel
-Ein MCP-Server der als Cloudflare Worker läuft und Facebook Graph API-Operationen als Tools exponiert. Claude (oder andere MCP-Clients) können damit Pages verwalten.
+
+Ein MCP-Server der als Cloudflare Worker läuft und Facebook Graph API-Operationen als Tools
+exponiert. Claude (oder andere MCP-Clients) können damit Pages verwalten.
 
 ### Stack
+
 - **Runtime:** Cloudflare Worker (Edge, kein Server nötig)
 - **MCP Transport:** HTTP/SSE (Streamable HTTP, da Workers kein WebSocket-State halten)
 - **Auth:** OAuth Token im Cloudflare KV gespeichert, MCP-Client gibt Page-ID mit
@@ -186,6 +216,7 @@ Facebook Graph API
 ```
 
 ### Cloudflare KV Schema
+
 ```
 key: "token:{user_id}"
 value: {
@@ -249,10 +280,12 @@ wrangler deploy
 
 ### Wichtige Entscheidungen für den nächsten Agent
 
-- **Token-Refresh:** Long-Lived Tokens (~60 Tage) oder System User Token (ablauflos, braucht Business Manager)
+- **Token-Refresh:** Long-Lived Tokens (~60 Tage) oder System User Token (ablauflos, braucht
+  Business Manager)
 - **Multi-User:** KV key per User-ID, jeder User macht einmal OAuth
 - **MCP Auth:** Ob der MCP-Endpoint selbst auth-geschützt sein soll (empfohlen: Bearer Token in KV)
-- **Bildhosting:** Bilder müssen öffentlich erreichbar sein für die Graph API — entweder R2 Bucket oder direkte URL
+- **Bildhosting:** Bilder müssen öffentlich erreichbar sein für die Graph API — entweder R2 Bucket
+  oder direkte URL
 
 ---
 
