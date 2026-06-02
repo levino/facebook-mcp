@@ -68,11 +68,17 @@ Copy `.env.example` to `.env` and fill it in for local runs.
 
 ## Deployment (Bunny Edge Scripting)
 
-1. Create an Edge Script in the bunny.net dashboard and note its **Script ID**. Generate a **Deploy
-   Key** for it.
+Deployment uses bunny.net's **native GitHub integration**: bunny watches `main` and, on every push,
+runs the configured build command and deploys the resulting entry file. There is no deploy workflow
+in this repo and no GitHub secrets are required.
+
+1. In the bunny.net dashboard, connect this repository to the Edge Script and set:
+   - **Install command:** _(none — Deno resolves imports during build)_
+   - **Build command:** `deno task build`
+   - **Entry file:** `dist/main.js`
 2. Create a **Bunny Database** and, under _Access → Generate Tokens_, create credentials. Note the
    database URL and auth token.
-3. Add these as environment variables on the Edge Script:
+3. Set these as environment variables on the Edge Script:
 
    | Variable                    | Notes                                                                         |
    | --------------------------- | ----------------------------------------------------------------------------- |
@@ -83,13 +89,15 @@ Copy `.env.example` to `.env` and fill it in for local runs.
    | `BUNNY_DATABASE_URL`        | from step 2                                                                   |
    | `BUNNY_DATABASE_AUTH_TOKEN` | from step 2                                                                   |
 
-4. Add repository secrets `BUNNY_SCRIPT_ID` and `BUNNY_DEPLOY_KEY`. Pushing to `main` then bundles
-   and deploys via `.github/workflows/deploy.yml`.
-5. Apply the database schema once (the OAuth callback also creates it lazily):
+4. Apply the database schema once (the OAuth callback also creates it lazily):
 
    ```bash
    BUNNY_DATABASE_URL=… BUNNY_DATABASE_AUTH_TOKEN=… deno task migrate
    ```
+
+> CI (`.github/workflows/checks.yml`) runs fmt/lint/type-check/test/build on pushes and PRs.
+> Bundling is also part of the build that bunny runs, so a green `checks` run means the artifact
+> bunny deploys will build too.
 
 ## Connecting a Facebook account
 
@@ -121,6 +129,5 @@ Point a Streamable-HTTP MCP client at `https://<your-script-host>/mcp` with an
 `.devcontainer/devcontainer.json` mirrors the
 [`levinkeller.de`](https://github.com/levino/levinkeller.de) hatchery setup (Tailscale join via
 `HATCHERY_TS_*`) and adds the Deno toolchain, so a hatchery drone can pick up this repo and
-immediately run `deno task test` / `deno task
-build`. Deployment itself goes through bunny.net
-(GitHub Action), so no cluster access is required to ship.
+immediately run `deno task test` / `deno task build`. Deployment goes through bunny.net's native
+GitHub integration, so no cluster access is required to ship.
