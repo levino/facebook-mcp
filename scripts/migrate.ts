@@ -6,7 +6,7 @@
 
 import { loadConfig } from "../src/config.ts";
 import { createLibsqlDb } from "../src/db/client.ts";
-import { ensureSchema } from "../src/db/tokens.ts";
+import { migrate } from "../src/db/migrations.ts";
 
 const config = loadConfig(Deno.env.toObject());
 if (!config.databaseUrl || !config.databaseAuthToken) {
@@ -15,5 +15,10 @@ if (!config.databaseUrl || !config.databaseAuthToken) {
 }
 
 const db = createLibsqlDb(config.databaseUrl, config.databaseAuthToken);
-await ensureSchema(db);
-console.log("Schema applied to", config.databaseUrl);
+const ran = await migrate(db);
+if (ran.length === 0) {
+  console.log("Database already up to date:", config.databaseUrl);
+} else {
+  console.log(`Applied ${ran.length} migration(s) to ${config.databaseUrl}:`);
+  for (const id of ran) console.log("  -", id);
+}

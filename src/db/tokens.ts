@@ -8,6 +8,7 @@
  */
 
 import type { Db } from "./client.ts";
+import { migrate } from "./migrations.ts";
 
 export type TokenKind = "user" | "page";
 
@@ -25,20 +26,9 @@ export interface StoredToken {
 
 export const USER_TOKEN_ID = "user";
 
-export const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS fb_tokens (
-  id           TEXT PRIMARY KEY,
-  kind         TEXT NOT NULL,
-  name         TEXT,
-  access_token TEXT NOT NULL,
-  expires_at   INTEGER,
-  updated_at   INTEGER NOT NULL
-);
-`;
-
-/** Creates the schema if it does not yet exist. */
+/** Brings the database schema up to date (runs pending migrations). */
 export async function ensureSchema(db: Db): Promise<void> {
-  await db.execute({ sql: SCHEMA_SQL });
+  await migrate(db);
 }
 
 function nowSeconds(now?: number): number {
