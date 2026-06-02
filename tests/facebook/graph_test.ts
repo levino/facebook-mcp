@@ -124,6 +124,15 @@ Deno.test("repost shares a permalink to the target page", async () => {
   assertEquals(form.get("access_token"), "TT");
 });
 
+Deno.test("getMe returns the user id and name", async () => {
+  const mock = createFetchMock(() => ({ json: { id: "fbuser1", name: "Alice" } }));
+  const me = await client(mock).getMe("user-token");
+  assertEquals(me, { id: "fbuser1", name: "Alice" });
+  const q = mock.query(0);
+  assertEquals(q.get("access_token"), "user-token");
+  assertEquals(q.get("fields"), "id,name");
+});
+
 Deno.test("exchangeLongLivedToken parses token and expiry", async () => {
   const mock = createFetchMock(() => ({
     json: { access_token: "long-tok", expires_in: 5184000 },

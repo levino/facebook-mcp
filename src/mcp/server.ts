@@ -22,7 +22,7 @@ import {
   type JsonRpcResponse,
   success,
 } from "./jsonrpc.ts";
-import type { Tool } from "./tools.ts";
+import type { Tool, ToolContext } from "./tools.ts";
 
 /** Latest protocol version we implement; we echo the client's if compatible. */
 export const PROTOCOL_VERSION = "2025-06-18";
@@ -38,14 +38,23 @@ export interface ServerInfo {
 }
 
 export interface McpServer {
-  /** Returns the response payload, or null if nothing to respond with. */
-  handle(payload: unknown): Promise<JsonRpcResponse | JsonRpcResponse[] | null>;
+  /**
+   * Handles a parsed JSON-RPC payload for an authenticated user. Returns the
+   * response payload, or null if nothing to respond with.
+   */
+  handle(
+    payload: unknown,
+    ctx: ToolContext,
+  ): Promise<JsonRpcResponse | JsonRpcResponse[] | null>;
 }
 
 export function createMcpServer(tools: Tool[], info: ServerInfo): McpServer {
   const toolsByName = new Map(tools.map((t) => [t.name, t]));
 
-  async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+  async function handleRequest(
+    req: JsonRpcRequest,
+    ctx: ToolContext,
+  ): Promise<JsonRpcResponse | null> {
     const id = req.id ?? null;
     switch (req.method) {
       case "initialize": {
@@ -77,7 +86,7 @@ export function createMcpServer(tools: Tool[], info: ServerInfo): McpServer {
         }
         const args = (req.params?.arguments ?? {}) as Record<string, unknown>;
         try {
-          const text = await tool.handler(args);
+          const text = await tool.handler(args, ctx);
           return success(id, { content: [{ type: "text", text }], isError: false });
         } catch (err) {
           // Tool failures are returned as a result with isError=true so the
@@ -94,7 +103,7 @@ export function createMcpServer(tools: Tool[], info: ServerInfo): McpServer {
     }
   }
 
-  async function handleOne(value: unknown): Promise<JsonRpcResponse | null> {
+  async function handleOne(value: unknown, ctx: ToolContext): Promise<JsonRpcResponse | null> {
     if (!isJsonRpcRequest(value)) {
       return error(null, ErrorCode.InvalidRequest, "Invalid JSON-RPC request");
     }
@@ -102,23 +111,23 @@ export function createMcpServer(tools: Tool[], info: ServerInfo): McpServer {
       // Notifications (initialized, cancelled, ...) get no response.
       return null;
     }
-    return await handleRequest(value);
+    return await handleRequest(value, ctx);
   }
 
   return {
-    async handle(payload) {
+    async handle(payload, ctx) {
       if (Array.isArray(payload)) {
         if (payload.length === 0) {
           return error(null, ErrorCode.InvalidRequest, "Empty batch");
         }
         const responses: JsonRpcResponse[] = [];
         for (const item of payload) {
-          const res = await handleOne(item);
+          const res = await handleOne(item, ctx);
           if (res) responses.push(res);
         }
         return responses.length > 0 ? responses : null;
       }
-      return await handleOne(payload);
+      return await handleOne(payload, ctx);
     },
   };
 }

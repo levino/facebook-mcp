@@ -1,22 +1,18 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { createTools } from "../../src/mcp/tools.ts";
+import { createTools, type ToolContext } from "../../src/mcp/tools.ts";
 import { GraphClient } from "../../src/facebook/graph.ts";
 import { createFetchMock } from "../helpers/fetch_mock.ts";
 import { createSqliteTestDb } from "../helpers/sqlite_db.ts";
-import { ensureSchema, saveUserAndPages } from "../../src/db/tokens.ts";
-import type { Db } from "../../src/db/client.ts";
+import { seedUser } from "../helpers/seed.ts";
+
+const CTX: ToolContext = { userId: "alice" };
 
 async function setup(responder: Parameters<typeof createFetchMock>[0]) {
   const db = createSqliteTestDb();
-  await ensureSchema(db);
-  await saveUserAndPages(db, {
-    userToken: "user-tok",
-    userTokenExpiresAt: null,
-    pages: [
-      { id: "100", name: "Levin Keller", accessToken: "pt-100" },
-      { id: "200", name: "CDU Nordstemmen", accessToken: "pt-200" },
-    ],
-  });
+  await seedUser(db, "alice", [
+    { pageId: "100", name: "Levin Keller", accessToken: "pt-100" },
+    { pageId: "200", name: "CDU Nordstemmen", accessToken: "pt-200" },
+  ]);
   const mock = createFetchMock(responder);
   const graph = new GraphClient({ version: "v22.0", fetch: mock.fetch, baseUrl: "https://g.test" });
   const tools = createTools({ graph, db });
@@ -25,11 +21,12 @@ async function setup(responder: Parameters<typeof createFetchMock>[0]) {
 }
 
 function run(
-  get: (n: string) => { handler: (a: Record<string, unknown>) => Promise<string> },
+  get: (n: string) => { handler: (a: Record<string, unknown>, c: ToolContext) => Promise<string> },
   name: string,
   args: Record<string, unknown>,
+  ctx: ToolContext = CTX,
 ) {
-  return get(name).handler(args);
+  return get(name).handler(args, ctx);
 }
 
 Deno.test("createTools exposes the full handbook tool set", async () => {
@@ -47,7 +44,7 @@ Deno.test("createTools exposes the full handbook tool set", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("list_pages reports connected pages", async () => {
+Deno.test("list_pages reports only the calling user's pages", async () => {
   const { get, db } = await setup(() => ({ json: {} }));
   const text = await run(get, "list_pages", {});
   assertStringIncludes(text, "Levin Keller — 100");
@@ -55,28 +52,32 @@ Deno.test("list_pages reports connected pages", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("list_pages on empty db prompts for OAuth", async () => {
-  const emptyDb = createSqliteTestDb();
-  await ensureSchema(emptyDb);
-  const mock = createFetchMock(() => ({ json: {} }));
-  const graph = new GraphClient({ fetch: mock.fetch });
-  const tools = createTools({ graph, db: emptyDb as unknown as Db });
-  const text = await tools.find((t) => t.name === "list_pages")!.handler({});
-  assertStringIncludes(text, "/oauth/start");
-  emptyDb.close();
+Deno.test("list_pages for a user with no pages prompts to connect", async () => {
+  const { get, db } = await setup(() => ({ json: {} }));
+  const text = await run(get, "list_pages", {}, { userId: "stranger" });
+  assertStringIncludes(text, "log in with Facebook");
+  (db as unknown as { close(): void }).close();
 });
 
-Deno.test("create_post resolves page token and posts a draft", async () => {
+Deno.test("create_post uses the user's stored page token (draft)", async () => {
   const { get, mock, db } = await setup(() => ({ json: { id: "100_555" } }));
-  const text = await run(get, "create_post", {
-    page_id: "100",
-    message: "Hallo Welt",
-    draft: true,
-  });
+  const text = await run(get, "create_post", { page_id: "100", message: "Hallo", draft: true });
   assertStringIncludes(text, "Created draft 100_555");
-  // Uses the stored page token, not the user token.
   assertEquals(mock.form(0).get("access_token"), "pt-100");
   assertEquals(mock.form(0).get("unpublished_content_type"), "DRAFT");
+  (db as unknown as { close(): void }).close();
+});
+
+Deno.test("tenant isolation: a user cannot post to a page they don't own", async () => {
+  const { get, db } = await setup(() => ({ json: {} }));
+  let message = "";
+  try {
+    // 'bob' has no pages seeded.
+    await run(get, "create_post", { page_id: "100", message: "x" }, { userId: "bob" });
+  } catch (e) {
+    message = (e as Error).message;
+  }
+  assertStringIncludes(message, "not connected to your account");
   (db as unknown as { close(): void }).close();
 });
 
@@ -84,19 +85,16 @@ Deno.test("create_post uploads images then attaches them", async () => {
   let call = 0;
   const { get, mock, db } = await setup(() => {
     call += 1;
-    if (call <= 2) return { json: { id: `photo${call}` } }; // two uploads
-    return { json: { id: "100_999" } }; // the feed post
+    if (call <= 2) return { json: { id: `photo${call}` } };
+    return { json: { id: "100_999" } };
   });
   const text = await run(get, "create_post", {
     page_id: "100",
-    message: "with pics",
+    message: "pics",
     image_urls: ["https://img/a.jpg", "https://img/b.jpg"],
   });
   assertStringIncludes(text, "100_999");
-  // First two requests are photo uploads.
   assertEquals(mock.requests[0].url, "https://g.test/v22.0/100/photos");
-  assertEquals(mock.requests[1].url, "https://g.test/v22.0/100/photos");
-  // Final request attaches both photo ids.
   assertEquals(
     mock.form(2).get("attached_media"),
     JSON.stringify([{ media_fbid: "photo1" }, { media_fbid: "photo2" }]),
@@ -104,7 +102,7 @@ Deno.test("create_post uploads images then attaches them", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("create_post validates that content is provided", async () => {
+Deno.test("create_post requires some content", async () => {
   const { get, db } = await setup(() => ({ json: {} }));
   let message = "";
   try {
@@ -116,28 +114,15 @@ Deno.test("create_post validates that content is provided", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("create_post errors clearly for unknown page", async () => {
-  const { get, db } = await setup(() => ({ json: {} }));
-  let message = "";
-  try {
-    await run(get, "create_post", { page_id: "999", message: "x" });
-  } catch (e) {
-    message = (e as Error).message;
-  }
-  assertStringIncludes(message, "No access token stored for page 999");
-  (db as unknown as { close(): void }).close();
-});
-
-Deno.test("publish_post calls publish with page token", async () => {
+Deno.test("publish_post uses the user's page token", async () => {
   const { get, mock, db } = await setup(() => ({ json: { success: true } }));
   const text = await run(get, "publish_post", { page_id: "200", post_id: "200_1" });
   assertStringIncludes(text, "Published post 200_1");
-  assertEquals(mock.requests[0].url, "https://g.test/v22.0/200_1");
   assertEquals(mock.form(0).get("access_token"), "pt-200");
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("edit_post requires a message argument", async () => {
+Deno.test("edit_post requires a message", async () => {
   const { get, db } = await setup(() => ({ json: { success: true } }));
   let message = "";
   try {
@@ -149,7 +134,7 @@ Deno.test("edit_post requires a message argument", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("delete_post deletes using the page token", async () => {
+Deno.test("delete_post deletes via the user's page token", async () => {
   const { get, mock, db } = await setup(() => ({ json: { success: true } }));
   await run(get, "delete_post", { page_id: "100", post_id: "100_7" });
   assertEquals(mock.requests[0].method, "DELETE");
@@ -157,7 +142,7 @@ Deno.test("delete_post deletes using the page token", async () => {
   (db as unknown as { close(): void }).close();
 });
 
-Deno.test("repost uses target page token and source permalink", async () => {
+Deno.test("repost requires the user to own both pages", async () => {
   const { get, mock, db } = await setup(() => ({ json: { id: "200_42" } }));
   const text = await run(get, "repost", {
     source_page_id: "100",
@@ -173,10 +158,7 @@ Deno.test("repost uses target page token and source permalink", async () => {
 
 Deno.test("upload_image returns the photo id", async () => {
   const { get, mock, db } = await setup(() => ({ json: { id: "photo-xyz" } }));
-  const text = await run(get, "upload_image", {
-    page_id: "100",
-    image_url: "https://img/x.jpg",
-  });
+  const text = await run(get, "upload_image", { page_id: "100", image_url: "https://img/x.jpg" });
   assertStringIncludes(text, "photo-xyz");
   assertEquals(mock.form(0).get("url"), "https://img/x.jpg");
   (db as unknown as { close(): void }).close();

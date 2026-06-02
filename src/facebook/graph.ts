@@ -132,6 +132,12 @@ export class GraphClient {
     }));
   }
 
+  /** Returns the id and name of the user the token belongs to. */
+  async getMe(userToken: string): Promise<{ id: string; name: string | null }> {
+    const json = await this.get("me", { access_token: userToken, fields: "id,name" });
+    return { id: String(json.id), name: json.name ? String(json.name) : null };
+  }
+
   /** Exchanges a short-lived user token for a long-lived (~60 day) one. */
   async exchangeLongLivedToken(
     appId: string,

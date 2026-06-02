@@ -38,13 +38,26 @@ Deno.test("migrate only runs pending migrations", async () => {
   db.close();
 });
 
-Deno.test("first migration creates the fb_tokens table", async () => {
+Deno.test("migrations create all expected tables", async () => {
   const db = createSqliteTestDb();
   await migrate(db);
   const { rows } = await db.execute({
-    sql: "SELECT name FROM sqlite_master WHERE type='table' AND name='fb_tokens'",
+    sql: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
   });
-  assertEquals(rows.length, 1);
+  const tables = rows.map((r) => String(r.name));
+  for (
+    const t of [
+      "fb_users",
+      "fb_pages",
+      "oauth_clients",
+      "oauth_logins",
+      "oauth_codes",
+      "oauth_tokens",
+      "web_sessions",
+    ]
+  ) {
+    assertEquals(tables.includes(t), true, `missing table ${t}`);
+  }
   db.close();
 });
 

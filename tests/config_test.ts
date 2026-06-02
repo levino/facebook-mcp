@@ -4,7 +4,6 @@ import {
   DEFAULT_GRAPH_VERSION,
   DEFAULT_OAUTH_SCOPE,
   loadConfig,
-  resolveRedirectUri,
 } from "../src/config.ts";
 
 Deno.test("loadConfig fills defaults for optional values", () => {
@@ -13,25 +12,33 @@ Deno.test("loadConfig fills defaults for optional values", () => {
   assertEquals(config.oauthScope, DEFAULT_OAUTH_SCOPE);
   assertEquals(config.serverName, "facebook-mcp");
   assertEquals(config.appId, "");
-  assertEquals(config.mcpAuthToken, "");
+  // TTL defaults
+  assertEquals(config.accessTokenTtlSeconds, 3600);
+  assertEquals(config.codeTtlSeconds, 300);
+  assertEquals(config.sessionTtlSeconds, 60 * 60 * 24 * 7);
 });
 
-Deno.test("loadConfig reads provided values", () => {
+Deno.test("loadConfig reads provided values and TTL overrides", () => {
   const config = loadConfig({
     FACEBOOK_APP_ID: "123",
     FACEBOOK_APP_SECRET: "secret",
     FACEBOOK_GRAPH_VERSION: "v21.0",
     FACEBOOK_OAUTH_SCOPE: "pages_show_list",
-    OAUTH_REDIRECT_URI: "https://example.com/oauth/callback",
-    MCP_AUTH_TOKEN: "tok",
     BUNNY_DATABASE_URL: "libsql://db",
     BUNNY_DATABASE_AUTH_TOKEN: "dbtok",
+    ACCESS_TOKEN_TTL: "120",
   });
   assertEquals(config.appId, "123");
   assertEquals(config.graphVersion, "v21.0");
   assertEquals(config.oauthScope, "pages_show_list");
-  assertEquals(config.oauthRedirectUri, "https://example.com/oauth/callback");
   assertEquals(config.databaseUrl, "libsql://db");
+  assertEquals(config.accessTokenTtlSeconds, 120);
+});
+
+Deno.test("loadConfig ignores invalid TTL values", () => {
+  const config = loadConfig({ ACCESS_TOKEN_TTL: "not-a-number", CODE_TTL: "-5" });
+  assertEquals(config.accessTokenTtlSeconds, 3600);
+  assertEquals(config.codeTtlSeconds, 300);
 });
 
 Deno.test("assertRuntimeConfig throws listing all missing vars", () => {
@@ -57,21 +64,5 @@ Deno.test("assertRuntimeConfig passes when all required present", () => {
       BUNNY_DATABASE_URL: "3",
       BUNNY_DATABASE_AUTH_TOKEN: "4",
     }),
-  );
-});
-
-Deno.test("resolveRedirectUri prefers configured value", () => {
-  const config = loadConfig({ OAUTH_REDIRECT_URI: "https://fixed.example/cb" });
-  assertEquals(
-    resolveRedirectUri(config, "https://worker.example/oauth/start"),
-    "https://fixed.example/cb",
-  );
-});
-
-Deno.test("resolveRedirectUri derives from request origin when unset", () => {
-  const config = loadConfig({});
-  assertEquals(
-    resolveRedirectUri(config, "https://worker.example/oauth/start?x=1"),
-    "https://worker.example/oauth/callback",
   );
 });

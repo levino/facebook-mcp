@@ -16,15 +16,8 @@ export interface Config {
   appSecret: string;
   /** Graph API version, e.g. "v22.0". */
   graphVersion: string;
-  /** Space/comma separated OAuth scopes requested during /oauth/start. */
+  /** Space/comma separated OAuth scopes requested from Facebook. */
   oauthScope: string;
-  /**
-   * Public callback URL. When empty it is derived from the request origin so a
-   * single deployment works across preview and production hostnames.
-   */
-  oauthRedirectUri: string;
-  /** Bearer token required on the /mcp endpoint. Empty means "no auth". */
-  mcpAuthToken: string;
   /** Bunny Database (libSQL) URL. */
   databaseUrl: string;
   /** Bunny Database (libSQL) auth token. */
@@ -32,10 +25,25 @@ export interface Config {
   /** Reported via MCP `initialize`. */
   serverName: string;
   serverVersion: string;
+  /** Lifetime of issued MCP access tokens (seconds). */
+  accessTokenTtlSeconds: number;
+  /** Lifetime of issued MCP refresh tokens (seconds). */
+  refreshTokenTtlSeconds: number;
+  /** Lifetime of one-time authorization codes (seconds). */
+  codeTtlSeconds: number;
+  /** Lifetime of a pending federation login (seconds). */
+  loginTtlSeconds: number;
+  /** Lifetime of a human dashboard session (seconds). */
+  sessionTtlSeconds: number;
 }
 
 export const DEFAULT_GRAPH_VERSION = "v22.0";
 export const DEFAULT_OAUTH_SCOPE = "pages_manage_posts,pages_read_engagement,pages_show_list";
+
+function intEnv(value: string | undefined, fallback: number): number {
+  const n = value === undefined ? NaN : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 export function loadConfig(env: Env): Config {
   return {
@@ -43,12 +51,15 @@ export function loadConfig(env: Env): Config {
     appSecret: env.FACEBOOK_APP_SECRET ?? "",
     graphVersion: env.FACEBOOK_GRAPH_VERSION || DEFAULT_GRAPH_VERSION,
     oauthScope: env.FACEBOOK_OAUTH_SCOPE || DEFAULT_OAUTH_SCOPE,
-    oauthRedirectUri: env.OAUTH_REDIRECT_URI ?? "",
-    mcpAuthToken: env.MCP_AUTH_TOKEN ?? "",
     databaseUrl: env.BUNNY_DATABASE_URL ?? "",
     databaseAuthToken: env.BUNNY_DATABASE_AUTH_TOKEN ?? "",
     serverName: env.MCP_SERVER_NAME || "facebook-mcp",
     serverVersion: env.MCP_SERVER_VERSION || "0.1.0",
+    accessTokenTtlSeconds: intEnv(env.ACCESS_TOKEN_TTL, 3600), // 1 hour
+    refreshTokenTtlSeconds: intEnv(env.REFRESH_TOKEN_TTL, 60 * 60 * 24 * 30), // 30 days
+    codeTtlSeconds: intEnv(env.AUTH_CODE_TTL, 300), // 5 minutes
+    loginTtlSeconds: intEnv(env.LOGIN_TTL, 600), // 10 minutes
+    sessionTtlSeconds: intEnv(env.SESSION_TTL, 60 * 60 * 24 * 7), // 7 days
   };
 }
 
@@ -60,19 +71,6 @@ export function assertRuntimeConfig(config: Config): void {
   if (!config.databaseUrl) missing.push("BUNNY_DATABASE_URL");
   if (!config.databaseAuthToken) missing.push("BUNNY_DATABASE_AUTH_TOKEN");
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(", ")}`,
-    );
+    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
-}
-
-/**
- * Resolves the redirect URI used for the OAuth dance. Prefers the explicitly
- * configured value; otherwise derives `${origin}/oauth/callback` from the
- * incoming request so previews work without extra configuration.
- */
-export function resolveRedirectUri(config: Config, requestUrl: string): string {
-  if (config.oauthRedirectUri) return config.oauthRedirectUri;
-  const origin = new URL(requestUrl).origin;
-  return `${origin}/oauth/callback`;
 }

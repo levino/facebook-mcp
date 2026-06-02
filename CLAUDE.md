@@ -4,9 +4,12 @@ Guidelines for working on `facebook-mcp` with Claude Code.
 
 ## Overview
 
-MCP server exposing Facebook Page operations as tools. Runs as a **Bunny Edge Script** (Deno
-runtime) with token storage in **Bunny Database** (libSQL). Design background lives in
-`FACEBOOK_MCP_HANDBOOK.md`; the running architecture is documented in `README.md`.
+Multi-tenant MCP server: any user connects their own Facebook account and manages their own Pages.
+Runs as a **Bunny Edge Script** (Deno) with state in **Bunny Database** (libSQL). MCP clients
+authenticate via a built-in **OAuth 2.1 (PKCE) authorization server federated to Facebook** — there
+is no shared secret. A small website (`src/web`) provides Login with Facebook, a dashboard, and
+token revocation. Design background lives in `FACEBOOK_MCP_HANDBOOK.md`; architecture in
+`README.md`.
 
 ## Toolchain
 
@@ -34,6 +37,11 @@ deno task dev     # serve locally on :8080
 - **Tests live in `tests/`** and use real in-memory SQLite (`node:sqlite`, via
   `tests/helpers/sqlite_db.ts`) and a mocked `fetch` (`tests/helpers/fetch_mock.ts`) — no network,
   no native libSQL bindings. Add tests alongside any behaviour change.
+- **Tenant isolation** is enforced in the data layer: every tool resolves page tokens via
+  `getPageToken(db, ctx.userId, pageId)`, which throws if the user does not own the page. New tools
+  must be user-scoped the same way; never look up a page without the `userId`.
+- **Schema changes** go through `src/db/migrations.ts` as a new appended migration (never edit a
+  released one). Raw OAuth tokens are never stored — only their SHA-256 hashes.
 - **Tool errors** are returned to the model as `tools/call` results with `isError: true`, not as
   JSON-RPC protocol errors. Only protocol-level problems (unknown method, bad request) use error
   responses.
