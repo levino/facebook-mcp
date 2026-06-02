@@ -1,0 +1,33 @@
+{
+  "name": "Deno & facebook-mcp",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/tailscale/codespace/tailscale": {},
+    "ghcr.io/devcontainers-extra/features/deno:1": {}
+  },
+  "containerEnv": {
+    "HATCHERY_TS_AUTH_KEY": "${localEnv:HATCHERY_TS_AUTH_KEY}",
+    "HATCHERY_TS_HOSTNAME": "${localEnv:HATCHERY_TS_HOSTNAME}",
+    "HATCHERY_TS_LOGIN_SERVER": "${localEnv:HATCHERY_TS_LOGIN_SERVER}"
+  },
+  "postStartCommand": "sudo tailscale up --login-server=${HATCHERY_TS_LOGIN_SERVER} --authkey=${HATCHERY_TS_AUTH_KEY} --hostname=${HATCHERY_TS_HOSTNAME}",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "denoland.vscode-deno",
+        "streetsidesoftware.code-spell-checker",
+        "streetsidesoftware.code-spell-checker-german",
+        "GitHub.vscode-pull-request-github"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "deno.enable": true,
+        "deno.lint": true,
+        "editor.defaultFormatter": "denoland.vscode-deno"
+      }
+    }
+  }
+}
